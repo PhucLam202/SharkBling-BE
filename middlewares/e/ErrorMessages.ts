@@ -86,4 +86,10 @@ export const ErrorMessages: { [key in ErrorCode]: string } = {
   [ErrorCode.DB_SCHEMA_ERROR]: "Database schema error",
 
   [ErrorCode.GROK_API_ERROR]: "GROK API error",
+
+  [ErrorCode.SUI_AGENT_ERROR]: "Sui Agent error",
+  [ErrorCode.SUI_AGENT_INITIALIZATION_FAILED]: "Sui Agent initialization failed",
+  [ErrorCode.SUI_AGENT_EXECUTION_FAILED]: "Sui Agent execution failed",
+  [ErrorCode.SUI_AGENT_INVALID_REQUEST]: "Sui Agent invalid request",
+  [ErrorCode.SUI_AGENT_TRANSACTION_FAILED]: "Sui Agent transaction failed",
 };
