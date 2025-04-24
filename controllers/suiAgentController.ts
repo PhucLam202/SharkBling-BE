@@ -4,6 +4,7 @@ import { CustomExpress } from "../middlewares/app/customResponse.ts";
 import { AppError } from "../middlewares/e/AppError.ts";
 import { ErrorCode } from "../middlewares/e/ErrorCode.ts";
 import axios from "axios";
+import { getTokenAddress, isValidToken } from "../middlewares/token/TokenMapping.ts";
 
 class SuiAgentController {
   private suiAgent: SuiAgentKit;
@@ -54,7 +55,7 @@ class SuiAgentController {
             {
               role: "system",
               content:
-                "You are a helpful assistant that understands blockchain commands. Identify the intent (balance, transfer, swap, stake, getStake, unstake, createPool, registerSns, getSns, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken) and extract parameters from the user's message. Respond with valid JSON in this exact format: {\"intent\": \"<intent>\", \"params\": {<key>: <value>, ...}}. Do not include any explanations or additional text.",
+                "You are a helpful assistant that understands blockchain commands. Identify the intent (balance, transfer, swap, stake, getStake, unstake, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken) and extract parameters from the user's message. Respond with valid JSON in this exact format: {\"intent\": \"<intent>\", \"params\": {<key>: <value>, ...}}. Do not include any explanations or additional text.",
             },
             { role: "user", content: message },
           ],
@@ -86,7 +87,6 @@ class SuiAgentController {
   }
 
   private async executeIntent(intent: string, params: any): Promise<string> {
-    console.log(`Step 5: executeIntent, intent: ${intent}, params: ${JSON.stringify(params)}`);
     switch (intent) {
       case "balance":
         return `Your wallet balance: ${JSON.stringify(await this.suiAgent.getHoldings())}`;
@@ -110,10 +110,32 @@ class SuiAgentController {
             return "Missing required parameters for swap: fromToken, toToken, amount";
           }
           
+          // Kiểm tra token có hợp lệ không
+          if (!isValidToken(fromToken)) {
+            return `Invalid fromToken: ${fromToken}. Please use a valid token symbol.`;
+          }
+          
+          if (!isValidToken(toToken)) {
+            return `Invalid toToken: ${toToken}. Please use a valid token symbol.`;
+          }
+          
+          // Lấy địa chỉ đầy đủ của token
+          const fromTokenAddress = getTokenAddress(fromToken);
+          const toTokenAddress = getTokenAddress(toToken);
+          
+          // Check if token addresses were found
+          if (!fromTokenAddress) {
+            return `Token address not found for: ${fromToken}`;
+          }
+          
+          if (!toTokenAddress) {
+            return `Token address not found for: ${toToken}`;
+          }
+          
           // Tạo đối tượng ISwapParams đúng định dạng
           const swapParams = {
-            fromToken: fromToken,
-            toToken: toToken,
+            fromToken: fromTokenAddress,
+            toToken: toTokenAddress,
             inputAmount: parseFloat(amount),
             slippage: 0.5 // Mặc định slippage 0.5%
           };
@@ -143,24 +165,6 @@ class SuiAgentController {
         const { stakedSuiId } = params;
         if (!stakedSuiId) return "Missing parameter: stakedSuiId";
         return `Unstake successful: ${JSON.stringify(await this.suiAgent.unstake(stakedSuiId))}`;
-      }
-
-      case "createPool":
-        if (!params || typeof params !== "object") return "Invalid createPool parameters.";
-        return `Pool created: ${JSON.stringify(await this.suiAgent.createPoolCetusCLMM(params))}`;
-
-      case "registerSns": {
-        const { name, years, payToken } = params;
-        if (!name || !years || !payToken) return "Missing parameters: name, years, payToken";
-        const yearsNum = parseInt(years);
-        if (isNaN(yearsNum)) return "Invalid years. Please provide a number.";
-        return `SNS registered: ${JSON.stringify(await this.suiAgent.registerSns(name, yearsNum, payToken))}`;
-      }
-
-      case "getSns": {
-        const { name } = params;
-        if (!name) return "Missing parameter: name";
-        return `SNS record: ${JSON.stringify(await this.suiAgent.getSnsNameRecord(name))}`;
       }
 
       case "stakeSuilend":
