@@ -16,9 +16,7 @@ class WalrusService {
       suiClient: this.suiClient,
     });
     const mnemonic= process.env.SUI_MNEMONIC;
-
     this.keypair = Ed25519Keypair.deriveKeypair(mnemonic  as string);
-    console.log("Using address:", this.keypair.toSuiAddress());
   }
 
   async uploadBlob(data?: any, description?: string): Promise<string> {
