@@ -2,21 +2,12 @@ import OpenAI from "openai";
 import { AppError } from "../middlewares/e/AppError.ts";
 import { ErrorCode } from "../middlewares/e/ErrorCode.ts";
 import { AnalysisResult } from "../types/grokAI.ts";
-
-/**
- * Theme definition for reputability evaluation of X/Twitter posts.
- * Defines prompt templates and structured output format.
- */
-interface ReputabilityTheme {
-  /** Prefix to introduce the analysis task */
-  analyzePrefix: string;
-  /** JSON schema prompt for structured output */
-  structuredOutputPrompt: string;
-}
+import { ReputabilityTheme } from "../types/grokAI.ts";
 
 // Theme instance tailored for evaluating X/Twitter post reliability
 const xPostReputabilityTheme: ReputabilityTheme = {
-  analyzePrefix: "Please analyze this X/Twitter post and evaluate its reputability: ",
+  analyzePrefix:
+    "Please analyze this X/Twitter post and evaluate its reputability: ",
   structuredOutputPrompt: `
 Please respond in JSON format strictly matching this schema:
 {
@@ -25,6 +16,27 @@ Please respond in JSON format strictly matching this schema:
   "reasoning": string,         // detailed explanation supporting your judgment
   "keyFactors": string[],      // list of main factors considered
   "recommendation": string     // suggested action based on analysis
+}
+`,
+};
+
+// Theme for analyzing trending Sui tokens
+export const trendingTokensTheme: ReputabilityTheme = {
+  analyzePrefix:
+    "Please analyze the most mentioned Sui ecosystem tokens on X in the past 24 hours: ",
+  structuredOutputPrompt: `
+Please respond in JSON format strictly matching this schema:
+{
+  "tokens": [
+    {
+      "name": string,          // Token name
+      "symbol": string,        // Token symbol
+      "mentions": number,      // Number of mentions
+      "relevance": string,     // Relevance to Sui ecosystem
+      "sentiment": string,     // "positive", "negative", or "neutral"
+      "reasoning": string      // Brief explanation for the sentiment
+    }
+  ]
 }
 `,
 };
@@ -53,42 +65,82 @@ class GrokAIService {
    */
   public async generateCompletion(
     content: string,
-    useAnalysisPrefix: boolean = true,
-    structured: boolean = true
+    useAnalysisPrefix = true,
+    structured = true
   ): Promise<string | AnalysisResult> {
     try {
-      // Build the prompt using the theme
-      let prompt = useAnalysisPrefix ? `${this.theme.analyzePrefix}${content}` : content;
-      if (structured) {
-        prompt += this.theme.structuredOutputPrompt;
-      }
+      let prompt = useAnalysisPrefix
+        ? `${this.theme.analyzePrefix}${content}`
+        : content;
+      if (structured) prompt += this.theme.structuredOutputPrompt;
 
       const completion = await this.client.chat.completions.create({
         model: "grok-3-mini-beta",
-        messages: [
-          { role: "user", content: prompt }
-        ]
+        messages: [{ role: "user", content: prompt }],
       });
-
       const raw = completion.choices[0].message.content || "";
-
       if (structured) {
-        // Extract JSON block
         const match = raw.match(/\{[\s\S]*\}/);
         if (match) {
           try {
-            return JSON.parse(match[0]) as AnalysisResult;
-          } catch (err) {
-            console.warn("JSON parse error:", err);
+            const parsed = JSON.parse(match[0]);
+            return parsed.tokens ? parsed : (parsed as AnalysisResult);
+          } catch {
+            console.warn("JSON parse error");
           }
         }
       }
       return raw;
-    } catch (error: any) {
-      throw AppError.newError500(
-        ErrorCode.GROK_API_ERROR,
-        `GROK_API_ERROR: ${(error as Error).message}`
+    } catch (error) {
+      console.error("Error in generateCompletion:", error);
+      throw new Error(
+        `Failed to generate completion: ${(error as Error).message}`
       );
+    }
+  }
+  public async generateInfluencer(screenname: string): Promise<string> {
+    const prompt = `ban ${screenname}`;
+    const res = await this.client.chat.completions.create({
+      model: "grok-3-mini-beta",
+      messages: [
+        {
+          role: "system",
+          content:
+            `Analyze user with screenname ${screenname} and provide EXACTLY 2 bold predictions in {title, description} format.
+            Each title must be catchy, provocative and description must be concise and intriguing.
+            Focus on high-risk, high-reward scenarios that would make exciting betting opportunities.
+            Return only 2 {title, description} pairs in JSON format, with no additional explanations.
+            Example prediction: SUI price might skyrocket to $10 within weeks, creating millionaires overnight.`,
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 1,
+    });
+    
+    let content = res.choices[0].message.content?.trim() || "";
+    
+    // Cố gắng trích xuất chỉ phần JSON từ phản hồi
+    try {
+      // Tìm và trích xuất phần JSON từ phản hồi
+      const jsonMatch = content.match(/\[\s*{[\s\S]*}\s*\]|\{\s*"title"[\s\S]*\}/);
+      if (jsonMatch) {
+        content = jsonMatch[0];
+      }
+      
+      // Nếu phản hồi là JSON hợp lệ, phân tích nó
+      const parsed = JSON.parse(content);
+      
+      // Nếu là mảng, lấy tối đa 2 phần tử đầu tiên
+      if (Array.isArray(parsed)) {
+        const limitedResults = parsed.slice(0, 2);
+        return JSON.stringify(limitedResults, null, 2);
+      }
+      
+      // Nếu là đối tượng đơn lẻ, trả về nó
+      return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+      // Nếu không phải JSON hợp lệ, trả về nguyên văn
+      return content;
     }
   }
 
@@ -96,14 +148,12 @@ class GrokAIService {
    * Public method to evaluate the reputability of an X/Twitter post.
    * @param postContent The text content of the post to analyze.
    */
-  async evaluatePostReputability(
-    postContent: string
-  ): Promise<AnalysisResult> {
+  async evaluatePostReputability(postContent: string): Promise<AnalysisResult> {
     const result = await this.generateCompletion(postContent, true);
-    if (typeof result === 'string') {
+    if (typeof result === "string") {
       throw AppError.newError500(
         ErrorCode.GROK_API_ERROR,
-        'Unexpected non-JSON response from reputability evaluation'
+        "Unexpected non-JSON response from reputability evaluation"
       );
     }
     return result;
@@ -111,3 +161,6 @@ class GrokAIService {
 }
 
 export default GrokAIService;
+
+// Sử dụng GrokAIService với trendingTokensTheme
+const grokService = new GrokAIService(trendingTokensTheme);
