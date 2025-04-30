@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { getTweetInfo } from "../services/x/xService.ts";
+import { getTweetInfo, getUserInfo } from "../services/x/xService.ts";
 import { CustomExpress } from "../middlewares/app/customResponse.ts";
 
 import GrokAIService from "../services/grokAIService.ts";
@@ -21,7 +21,7 @@ export const xController = {
       if (!display_text || !author?.screen_name) {
         throw new Error("Missing display_text or screen_name");
       }
-      console.log("tweetData",tweetData)
+      console.log("tweetData", tweetData);
       // 2. Gọi GrokAI để phân tích
       const grok = new GrokAIService();
       const analysis = await grok.generateCompletion(display_text);
@@ -38,7 +38,7 @@ export const xController = {
         `Analysis for ${tweetUrl}`
       );
       // Chỉ trả về dữ liệu mà không lưu vào DB
-      appExpress.response200({ blobId, analysis});
+      appExpress.response200({ blobId, analysis });
     } catch (e) {
       next(e);
     }

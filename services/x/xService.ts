@@ -19,6 +19,37 @@ export function extractTweetId(tweetUrl: string): string | null {
   }
 }
 
+export async function getUserInfo(screen_name: string) {
+  const screenname = screen_name;
+  const options = {
+    method: "GET",
+    url: "https://twitter-api45.p.rapidapi.com/timeline.php",
+    params: { screenname: screenname },
+    headers: {
+      "x-rapidapi-key": process.env.RAPIDAPI_KEY || "",
+      "x-rapidapi-host": "twitter-api45.p.rapidapi.com",
+    },
+  };
+
+  try {
+    const response = await axios.request(options);
+    const tweets = response.data?.timeline;
+
+    if (!Array.isArray(tweets)) throw new Error("Invalid API response format");
+
+    // Lấy text từ các tweet
+    const texts = tweets
+      .filter((tweet: any) => tweet.text)
+      .slice(0)
+      .map((tweet: any) => tweet.text);
+
+    return texts;
+  } catch (error) {
+    throw error;
+    ``;
+  }
+}
+
 // Hàm gọi API Twitter để lấy thông tin tweet
 export async function getTweetInfo(tweetUrl: string) {
   const tweetId = extractTweetId(tweetUrl);
@@ -42,6 +73,7 @@ export async function getTweetInfo(tweetUrl: string) {
     return response.data;
   } catch (error) {
     console.error("Error fetching tweet data:", error);
-    throw error;``
+    throw error;
+    ``;
   }
 }

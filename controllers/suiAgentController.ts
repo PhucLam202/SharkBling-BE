@@ -1,194 +1,221 @@
+// SuiAgentController.ts
 import { Request, Response, NextFunction } from "express";
-import { SuiAgentKit } from "@getnimbus/sui-agent-kit";
+import { IGetVaultsParams, SuiAgentKit } from "@getnimbus/sui-agent-kit";
 import { CustomExpress } from "../middlewares/app/customResponse.ts";
 import { AppError } from "../middlewares/e/AppError.ts";
 import { ErrorCode } from "../middlewares/e/ErrorCode.ts";
-import axios from "axios";
-import { getTokenAddress, isValidToken } from "../middlewares/token/TokenMapping.ts";
+import AIService from "../services/nimbusAiService.ts";
+import BlockchainService from "../services/BlockchainService.ts";
+import MarketAnalysisService from "../services/MarketAnalysisService.ts";
+import GrokAIService from "../services/grokAIService.ts";
+import generateInfluencer from "../services/grokAIService.ts";
+import {
+  StakingParams,
+  IUnstakingParams,
+  ILendingParams,
+  ICreateTokenForm,
+} from "../types/blockchain.ts";
+import { suiInfluencers } from "../types/data/influencer.ts";
+import { getUserInfo } from "../services/x/xService.ts";
 
+/**
+ * Controller điều phối các yêu cầu từ người dùng tới các services
+ */
 class SuiAgentController {
-  private suiAgent: SuiAgentKit;
-  private openaiApiKey: string;
+  private aiService: AIService;
+  private blockchainService: BlockchainService;
+  private marketAnalysisService: MarketAnalysisService;
 
+  /**
+   * Khởi tạo controller với các services cần thiết
+   */
   constructor() {
-    this.suiAgent = new SuiAgentKit(
-      process.env.SUI_PRIVATE_KEY || "",
+    const openaiApiKey = process.env.OPENAI_API_KEY || "";
+    const suiNetwork =
       process.env.SUI_NETWORK === "mainnet"
         ? "https://fullnode.mainnet.sui.io:443"
-        : "https://fullnode.testnet.sui.io:443",
-      process.env.OPENAI_API_KEY || ""
-    );
-    this.openaiApiKey = process.env.OPENAI_API_KEY || "";
+        : "https://fullnode.testnet.sui.io:443";
+    const suiPrivateKey = process.env.SUI_PRIVATE_KEY || "";
+
+    // Khởi tạo SuiAgentKit
+    const suiAgent = new SuiAgentKit(suiPrivateKey, suiNetwork, openaiApiKey);
+
+    // Khởi tạo các services
+    this.aiService = new AIService(openaiApiKey);
+    this.blockchainService = new BlockchainService(suiAgent);
+    this.marketAnalysisService = new MarketAnalysisService();
   }
-  // Method: Handle chat messages
+
+  /**
+   * Xử lý tin nhắn chat từ người dùng
+   * @param req Request object
+   * @param res Response object
+   * @param next NextFunction
+   */
   async handleChatMessage(req: Request, res: Response, next: NextFunction) {
     const appExpress = new CustomExpress(req, res, next);
+
     try {
       const { message } = req.body;
+
       if (!message || typeof message !== "string") {
-        return res.status(400).json({ success: false, message: "A valid message is required" });
+        return res.status(400).json({
+          success: false,
+          message: "A valid message is required",
+        });
       }
+
       const response = await this.processMessageWithAI(message);
       appExpress.response200({ response });
-    } catch (e) {
-      next(AppError.newError500(ErrorCode.SUI_AGENT_ERROR, `SUI_AGENT_ERROR: ${(e as Error).message}`));
+    } catch (error) {
+      next(
+        AppError.newError500(
+          ErrorCode.SUI_AGENT_ERROR,
+          `SUI_AGENT_ERROR: ${(error as Error).message}`
+        )
+      );
     }
   }
 
+  /**
+   * Xử lý tin nhắn với AI và thực thi lệnh tương ứng
+   * @param message Tin nhắn từ người dùng
+   * @returns Kết quả xử lý dạng string
+   */
   private async processMessageWithAI(message: string): Promise<string> {
+    console.log(message);
     try {
-      const aiResponse = await this.getAIResponse(message);
-      const { intent, params } = this.parseAIResponse(aiResponse);
+      // Lấy phản hồi từ AI và phân tích intent
+      const { intent, params } = await this.aiService.processMessage(message);
+      console.log(intent, params);
+      // Thực thi intent tương ứng
       return await this.executeIntent(intent, params);
     } catch (error) {
       return `Error processing your request: ${(error as Error).message}`;
     }
   }
+  private async suggestBetFromInfluencers(): Promise<string> {
+    const grokService = new GrokAIService();
+    let results: string[] = [];
+    let counter = 1;
 
-  private async getAIResponse(message: string): Promise<string> {
-    try {
-      const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a helpful assistant that understands blockchain commands. Identify the intent (balance, transfer, swap, stake, getStake, unstake, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken) and extract parameters from the user's message. Respond with valid JSON in this exact format: {\"intent\": \"<intent>\", \"params\": {<key>: <value>, ...}}. Do not include any explanations or additional text.",
-            },
-            { role: "user", content: message },
-          ],
-          max_tokens: 100,
-        },
-        { headers: { Authorization: `Bearer ${this.openaiApiKey}`, "Content-Type": "application/json" } }
-      );
-      const aiContent = response.data.choices[0].message.content;
-      console.log(`AI response: ${aiContent}`);
-      return aiContent;
-    } catch (error) {
-      console.error(`Failed to get AI response: ${error}`);
-      throw new Error("Failed to communicate with AI service");
-    }
-  }
-
-  private parseAIResponse(aiResponse: string): { intent: string; params: any } {
-    try {
-      const parsed = JSON.parse(aiResponse);
-      if (!parsed.intent || typeof parsed.intent !== "string") {
-        console.warn(`Invalid AI response format: ${aiResponse}`);
-        return { intent: "", params: {} };
-      }
-      return { intent: parsed.intent, params: parsed.params || {} };
-    } catch (e) {
-      console.error(`Failed to parse AI response: ${aiResponse}, error: ${e}`);
-      return { intent: "", params: {} };
-    }
-  }
-
-  private async executeIntent(intent: string, params: any): Promise<string> {
-    switch (intent) {
-      case "balance":
-        return `Your wallet balance: ${JSON.stringify(await this.suiAgent.getHoldings())}`;
-
-      case "transfer": {
-        const { token, recipient, amount } = params;
-        if (!token || !recipient || !amount) return "Missing parameters: token, recipient, amount";
-        const amountNum = parseFloat(amount);
-        if (isNaN(amountNum)) return "Invalid amount. Please provide a number.";
-        return `Transfer successful: ${JSON.stringify(await this.suiAgent.transferToken(token, recipient, amountNum))}`;
-      }
-
-      case "swap": {
-        if (!params || typeof params !== "object") return "Invalid swap parameters.";
+    for (const influencer of suiInfluencers) {
+      const screenname = influencer.screenname;
+      console.log("screenname", screenname);
+      try {
+        const tweets = await grokService.generateInfluencer(screenname);
         
-        try {
-          // Lấy thông tin từ params
-          const { fromToken, toToken, amount } = params;
-          
-          if (!fromToken || !toToken || amount === undefined) {
-            return "Missing required parameters for swap: fromToken, toToken, amount";
-          }
-          
-          // Kiểm tra token có hợp lệ không
-          if (!isValidToken(fromToken)) {
-            return `Invalid fromToken: ${fromToken}. Please use a valid token symbol.`;
-          }
-          
-          if (!isValidToken(toToken)) {
-            return `Invalid toToken: ${toToken}. Please use a valid token symbol.`;
-          }
-          
-          // Lấy địa chỉ đầy đủ của token
-          const fromTokenAddress = getTokenAddress(fromToken);
-          const toTokenAddress = getTokenAddress(toToken);
-          
-          // Check if token addresses were found
-          if (!fromTokenAddress) {
-            return `Token address not found for: ${fromToken}`;
-          }
-          
-          if (!toTokenAddress) {
-            return `Token address not found for: ${toToken}`;
-          }
-          
-          // Tạo đối tượng ISwapParams đúng định dạng
-          const swapParams = {
-            fromToken: fromTokenAddress,
-            toToken: toTokenAddress,
-            inputAmount: parseFloat(amount),
-            slippage: 0.5 // Mặc định slippage 0.5%
-          };
-          
-          console.log("Formatted swap params:", swapParams);
-          
-          // Thực hiện swap với tham số đã được định dạng
-          const result = await this.suiAgent.swap(swapParams);
-          return `Swap successful: ${JSON.stringify(result)}`;
-        } catch (error) {
-          console.error("Error during swap:", error);
-          return `Failed to swap tokens: ${(error as Error).message}`;
+        if (tweets && tweets.trim() !== "") {
+          // Thêm số thứ tự cho mỗi influencer
+          results.push(`${counter}.\n${tweets}`);
+          counter++;
         }
+      } catch (err) {
+        console.warn(
+          `⚠️ Failed to process tweets for ${influencer.name}: ${err}`
+        );
+        continue;
       }
-      case "stake": {
-        const { amount, poolId } = params;
-        if (!amount || !poolId) return "Missing parameters: amount, poolId";
-        const amountNum = parseFloat(amount);
-        if (isNaN(amountNum)) return "Invalid amount. Please provide a number.";
-        return `Stake successful: ${JSON.stringify(await this.suiAgent.stake(amountNum, poolId))}`;
+    }
+
+    return results.length > 0 ? results.join("\n\n") : "No predictions available from influencers.";
+  }
+  /**
+   * Thực thi intent được phân tích từ tin nhắn người dùng
+   * @param intent Intent được xác định
+   * @param params Các tham số cho intent
+   * @returns Kết quả thực thi dạng string
+   */
+  private async executeIntent(
+    intent: string,
+    params: Record<string, any>
+  ): Promise<string> {
+    console.log("intent",intent)
+    console.log("params",params)
+    try {
+      switch (intent) {
+        case "balance":
+          return await this.blockchainService.getBalance();
+
+        case "transfer":
+          return await this.blockchainService.transferToken(params);
+
+        case "swap":
+          return await this.blockchainService.swapTokens(params);
+
+        case "stake":
+          return await this.blockchainService.stakeTokens(params);
+
+        case "getStake":
+          return await this.blockchainService.getStakeInfo();
+
+        case "unstake":
+          return await this.blockchainService.unstakeTokens(params);
+
+        case "stakeSuilend":
+          // Chuyển đổi params thành StakingParams
+          const stakingParams: StakingParams = {
+            type: "STAKING",
+            amount: Number(params.amount),
+            symbol: params.symbol,
+          };
+          return await this.blockchainService.stakeSuilend(stakingParams);
+
+        case "withdrawSuilend":
+          // Chuyển đổi params thành IUnstakingParams
+          const unstakingParams: IUnstakingParams = {
+            type: "UNSTAKING",
+            amount: Number(params.amount),
+            symbol: params.symbol,
+            positionId: params.positionId,
+          };
+          return await this.blockchainService.withdrawSuilend(unstakingParams);
+
+        case "lendingSuilend":
+          // Chuyển đổi params thành ILendingParams
+          const lendingParams: ILendingParams = {
+            type: "LENDING",
+            amount: Number(params.amount),
+            symbol: params.symbol,
+          };
+          return await this.blockchainService.lendingSuilend(lendingParams);
+
+        case "getVaults":
+          // Chuyển đổi params thành IGetVaultsParams
+          const vaultParams: IGetVaultsParams = {
+            address: params.address || "",
+            order: params.order || "desc",
+            protocol: params.protocol || "",
+            tvl: params.tvl || "ALL",
+            apr: params.apr || "ALL",
+            tags: params.tags || [],
+          };
+          return await this.blockchainService.getVaults(vaultParams);
+
+        case "deployToken":
+          // Chuyển đổi params thành ICreateTokenForm
+          const tokenParams: ICreateTokenForm = {
+            name: params.name,
+            symbol: params.symbol,
+            totalSupply: params.totalSupply,
+            decimals: params.decimals,
+            imageUrl: params.imageUrl,
+            description: params.description || "",
+            fixedSupply: params.fixedSupply === false ? false : true,
+          };
+          return await this.blockchainService.deployToken(tokenParams);
+
+        case "suggestBet":
+          return await this.suggestBetFromInfluencers();
+          case "trendingTokens":
+            const result = await this.marketAnalysisService.analyzeTrendingTokens();
+            return JSON.stringify(result);
+
+        default:
+          return "Unknown command. Available: balance, transfer, swap, stake, getStake, unstake, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken, topcoin, trendingTokens";
       }
-
-      case "getStake":
-        return `Your stake information: ${JSON.stringify(await this.suiAgent.getStake())}`;
-
-      case "unstake": {
-        const { stakedSuiId } = params;
-        if (!stakedSuiId) return "Missing parameter: stakedSuiId";
-        return `Unstake successful: ${JSON.stringify(await this.suiAgent.unstake(stakedSuiId))}`;
-      }
-
-      case "stakeSuilend":
-        if (!params || typeof params !== "object") return "Invalid stakeSuilend parameters.";
-        return `Stake on Suilend: ${JSON.stringify(await this.suiAgent.stakeSuilend(params))}`;
-
-      case "withdrawSuilend":
-        if (!params || typeof params !== "object") return "Invalid withdrawSuilend parameters.";
-        return `Withdraw from Suilend: ${JSON.stringify(await this.suiAgent.withdrawSuilend(params))}`;
-
-      case "lendingSuilend":
-        if (!params || typeof params !== "object") return "Invalid lendingSuilend parameters.";
-        return `Lending on Suilend: ${JSON.stringify(await this.suiAgent.lendingSuilend(params))}`;
-
-      case "getVaults":
-        if (!params || typeof params !== "object") return "Invalid getVaults parameters.";
-        return `Vaults info: ${JSON.stringify(await this.suiAgent.getVaults(params))}`;
-
-      case "deployToken":
-        if (!params || typeof params !== "object") return "Invalid deployToken parameters.";
-        return `Token deployed: ${JSON.stringify(await this.suiAgent.deployToken(params))}`;
-
-      default:
-        return "Unknown command. Available: balance, transfer, swap, stake, getStake, unstake, createPool, registerSns, getSns, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken";
+    } catch (error) {
+      return `Command execution failed: ${(error as Error).message}`;
     }
   }
 }

@@ -19,6 +19,38 @@ class WalrusService {
     this.keypair = Ed25519Keypair.deriveKeypair(mnemonic  as string);
   }
 
+  // Chuyển đổi số bigint thành blobId dạng chuỗi
+  private numToBlobId(blobIdNum: bigint): string {
+    const extractedBytes: number[] = [];
+
+    for (let i = 0; i < 32; i++) {
+      extractedBytes.push(Number(blobIdNum & 0xFFn));
+      blobIdNum >>= 8n;
+    }
+
+    if (blobIdNum !== 0n) {
+      throw new Error("blobIdNum should be fully consumed (equal 0) after extracting bytes.");
+    }
+
+    const byteArray = new Uint8Array(extractedBytes);
+    const base64 = Buffer.from(byteArray).toString('base64url');
+    return base64.replace(/=+$/, '');
+  }
+
+  // Xử lý blobId dựa trên kiểu dữ liệu đầu vào
+  private processBlobId(blobId: string | bigint): string {
+    if (typeof blobId === 'string') {
+      if (/^\d+$/.test(blobId)) {
+        return this.numToBlobId(BigInt(blobId));
+      }
+      return blobId;
+    } else if (typeof blobId === 'bigint') {
+      return this.numToBlobId(blobId);
+    } else {
+      throw new Error("Invalid blobId type. Expected string or bigint.");
+    }
+  }
+
   async uploadBlob(data?: any, description?: string): Promise<string> {
     try {
       let fileData: Uint8Array;
@@ -62,24 +94,28 @@ class WalrusService {
     }
   }
 
-  async ReadBlod(blobId: string): Promise<Uint8Array> {
+  async ReadBlob(blobId: string | bigint): Promise<Uint8Array> {
     try {
-      const blob = await this.walrusClient.readBlob({ blobId });
+      const processedBlobId = this.processBlobId(blobId);
+      const blob = await this.walrusClient.readBlob({ blobId: processedBlobId });
       return blob;
     } catch (error: any) {
-      throw AppError.newError500(ErrorCode.WALRUS_BLOB_NOT_FOUND, "WALRUS_BLOB_NOT_FOUND " + (error as Error).message);
+      const errorMessage = error && error.message ? error.message : "Unknown error";
+      throw AppError.newError500(ErrorCode.WALRUS_BLOB_NOT_FOUND, "WALRUS_BLOB_NOT_FOUND " + errorMessage);
     }
   }
 
   async readBlobAsText(
-    blobId: string,
+    blobId: string | bigint,
     encoding: BufferEncoding = "utf-8"
   ): Promise<string> {
     try {
-      const blob = await this.ReadBlod(blobId);
+      const processedBlobId = this.processBlobId(blobId);
+      const blob = await this.walrusClient.readBlob({blobId:processedBlobId});
       return Buffer.from(blob).toString(encoding);
     } catch (error: any) {
-      throw AppError.newError500(ErrorCode.FILE_DOWNLOAD_ERROR, "FILE_DOWNLOAD_ERROR " + (error as Error).message);
+      const errorMessage = error && error.message ? error.message : "Unknown error";
+      throw AppError.newError500(ErrorCode.FILE_DOWNLOAD_ERROR, "FILE_DOWNLOAD_ERROR " + errorMessage);
     }
   }
 
