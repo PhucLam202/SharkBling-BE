@@ -1,12 +1,15 @@
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 async function checkCoins() {
   try {
     // Sử dụng mainnet thay vì testnet
     const suiClient = new SuiClient({ url: getFullnodeUrl("mainnet") });
-    const mnemonic = "treat shop space mention spider clever educate portion ride rebuild husband ozone";
-    const keypair = Ed25519Keypair.deriveKeypair(mnemonic);
+    const mnemonic = process.env.SUI_MNEMONIC;
+    const keypair = Ed25519Keypair.deriveKeypair(mnemonic as string);
     const address = keypair.toSuiAddress();
     
     console.log("Checking coins for address:", address);
