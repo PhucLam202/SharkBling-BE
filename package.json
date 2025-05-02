@@ -11,6 +11,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@flowx-finance/sdk": "^1.10.16",
     "@getnimbus/sui-agent-kit": "^0.1.21",
     "@mysten/sui": "^1.27.1",
     "@mysten/sui.js": "^0.54.1",

@@ -32,6 +32,14 @@ export interface SwapParams {
   slippage: number;
 }
 
+export interface FlowXSwapParams {
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  slippage?: number;
+  network?: string;
+}
+
 // Interface cho tham số withdraw
 export interface IWithdrawParams {
   type: string;

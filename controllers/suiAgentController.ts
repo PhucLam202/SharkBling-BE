@@ -4,19 +4,20 @@ import { IGetVaultsParams, SuiAgentKit } from "@getnimbus/sui-agent-kit";
 import { CustomExpress } from "../middlewares/app/customResponse.ts";
 import { AppError } from "../middlewares/e/AppError.ts";
 import { ErrorCode } from "../middlewares/e/ErrorCode.ts";
+import { FlowXService } from "../services/floxXService.ts";
 import AIService from "../services/nimbusAiService.ts";
 import BlockchainService from "../services/BlockchainService.ts";
 import MarketAnalysisService from "../services/MarketAnalysisService.ts";
 import GrokAIService from "../services/grokAIService.ts";
-import generateInfluencer from "../services/grokAIService.ts";
 import {
   StakingParams,
   IUnstakingParams,
   ILendingParams,
   ICreateTokenForm,
+  FlowXSwapParams,
 } from "../types/blockchain.ts";
 import { suiInfluencers } from "../types/data/influencer.ts";
-import { getUserInfo } from "../services/x/xService.ts";
+import { getTokenAddress, isValidToken } from "../middlewares/token/TokenMapping.ts";
 
 /**
  * Controller điều phối các yêu cầu từ người dùng tới các services
@@ -25,7 +26,7 @@ class SuiAgentController {
   private aiService: AIService;
   private blockchainService: BlockchainService;
   private marketAnalysisService: MarketAnalysisService;
-
+  private flowXService: FlowXService;
   /**
    * Khởi tạo controller với các services cần thiết
    */
@@ -44,6 +45,7 @@ class SuiAgentController {
     this.aiService = new AIService(openaiApiKey);
     this.blockchainService = new BlockchainService(suiAgent);
     this.marketAnalysisService = new MarketAnalysisService();
+    this.flowXService = new FlowXService();
   }
 
   /**
@@ -104,7 +106,7 @@ class SuiAgentController {
       console.log("screenname", screenname);
       try {
         const tweets = await grokService.generateInfluencer(screenname);
-        
+
         if (tweets && tweets.trim() !== "") {
           // Thêm số thứ tự cho mỗi influencer
           results.push(`${counter}.\n${tweets}`);
@@ -118,7 +120,22 @@ class SuiAgentController {
       }
     }
 
-    return results.length > 0 ? results.join("\n\n") : "No predictions available from influencers.";
+    return results.length > 0
+      ? results.join("\n\n")
+      : "No predictions available from influencers.";
+  }
+  private convertDecimalToInteger(decimalValue: string, decimals: number = 9): string {
+    if (!decimalValue || isNaN(Number(decimalValue))) {
+      throw new Error("Invalid decimal value");
+    }
+    
+    // Chuyển đổi từ số thập phân sang đơn vị nhỏ nhất
+    // Ví dụ: 0.2 SUI với 9 decimals = 0.2 * 10^9 = 200,000,000 MIST
+    const integerValue = Math.round(
+      Number(decimalValue) * Math.pow(10, decimals)
+    );
+  
+    return integerValue.toString();
   }
   /**
    * Thực thi intent được phân tích từ tin nhắn người dùng
@@ -130,8 +147,8 @@ class SuiAgentController {
     intent: string,
     params: Record<string, any>
   ): Promise<string> {
-    console.log("intent",intent)
-    console.log("params",params)
+    console.log("intent", intent);
+    console.log("params", params);
     try {
       switch (intent) {
         case "balance":
@@ -140,9 +157,26 @@ class SuiAgentController {
         case "transfer":
           return await this.blockchainService.transferToken(params);
 
+        // case "swap":
+        //   return await this.blockchainService.swapTokens(params);
         case "swap":
-          return await this.blockchainService.swapTokens(params);
-
+          // Chuyển đổi từ symbol sang địa chỉ token
+          const tokenInAddress = getTokenAddress(params.fromToken || params.tokenIn);
+          const tokenOutAddress = getTokenAddress(params.toToken || params.tokenOut);
+          
+          if (!tokenInAddress || !tokenOutAddress) {
+            return `Error: Could not find address for token ${params.fromToken || params.tokenIn} or ${params.toToken || params.tokenOut}`;
+          }
+          
+          const flowXParams: FlowXSwapParams = {
+            tokenIn: tokenInAddress,
+            tokenOut: tokenOutAddress,
+            amountIn: params.amount ? 
+              this.convertDecimalToInteger(params.amount.toString()) : 
+              params.inputAmount?.toString() || params.amountIn?.toString(),
+            slippage: 1, // Default slippage of 1%
+          };
+          return await this.flowXService.FlowXSwap(flowXParams);
         case "stake":
           return await this.blockchainService.stakeTokens(params);
 
@@ -207,9 +241,10 @@ class SuiAgentController {
 
         case "suggestBet":
           return await this.suggestBetFromInfluencers();
-          case "trendingTokens":
-            const result = await this.marketAnalysisService.analyzeTrendingTokens();
-            return JSON.stringify(result);
+        case "trendingTokens":
+          const result =
+            await this.marketAnalysisService.analyzeTrendingTokens();
+          return JSON.stringify(result);
 
         default:
           return "Unknown command. Available: balance, transfer, swap, stake, getStake, unstake, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken, topcoin, trendingTokens";
