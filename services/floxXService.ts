@@ -100,7 +100,6 @@ export class FlowXService {
         });
       });
 
-      console.log("Routes fetched successfully:", routesResult.routes);
       return routesResult.routes as SDKRoute<Coin, Coin>[];
     } catch (error) {
       console.error("Failed to fetch routes:", error);
@@ -113,7 +112,6 @@ export class FlowXService {
    * @returns Kết quả giao dịch
    */
   async FlowXSwap(params: SwapParams): Promise<any> {
-    console.log("paramL", params);
     try {
       const { tokenIn, tokenOut, amountIn, slippage } = params;
       const network = "mainnet";
@@ -189,7 +187,6 @@ export class FlowXService {
 
       // Lấy amountOut từ routes
       const amountOut = router[0]?.amountOut || "0";
-      console.log("Amount out:", amountOut);
 
       // Kiểm tra amountIn và amountOut
       if (typeof amountIn !== "string" || !/^\d+$/.test(amountIn)) {
@@ -200,16 +197,6 @@ export class FlowXService {
       }
 
       const tradeBuilder = new TradeBuilder(network, router);
-
-      // Log input parameters
-      console.log("Input parameters:", {
-        sender,
-        amountIn,
-        amountOut,
-        slippage: slippageValue,
-        deadline: Date.now() + 3600 * 1000,
-      });
-
       // Build trade
       const trade = tradeBuilder
         .sender(sender)
@@ -218,8 +205,6 @@ export class FlowXService {
         .deadline(Date.now() + 3600 * 1000)
         .amountOut(amountOut)
         .build();
-
-      console.log("Trade built:", trade);
 
       // Execute swap
       const txn = new Transaction();
@@ -247,7 +232,7 @@ export class FlowXService {
         requestType: "WaitForLocalExecution",
       });
       // Truy vấn chi tiết giao dịch
-      const txDetails = await client.getTransactionBlock({
+          const txDetails = await client.getTransactionBlock({
         digest: response.digest,
         options: {
           showEffects: true,
@@ -260,12 +245,16 @@ export class FlowXService {
 
       const status = response?.effects?.status?.status;
 
-      return {
+      // Create the response object
+      const responseObj = {
         success: status === "success",
         digest: response?.digest,
         explorerUrl: `https://suiscan.xyz/mainnet/tx/${response?.digest}`,
         sender,
       };
+      
+      // Convert to JSON string
+      return JSON.stringify(responseObj);
     } catch (error) {
       console.error("FlowX swap failed:", error);
       throw new Error(

@@ -99,18 +99,19 @@ class GrokAIService {
     }
   }
   public async generateInfluencer(screenname: string): Promise<string> {
-    const prompt = `ban ${screenname}`;
+    const prompt = `analyze crypto trends`;
     const res = await this.client.chat.completions.create({
       model: "grok-3-mini-beta",
       messages: [
         {
           role: "system",
           content:
-            `Analyze user with screenname ${screenname} and provide EXACTLY 2 bold predictions in {title, description} format.
+            `Analyze user with ${screenname} and provide EXACTLY 2 bold predictions in {title, description} format.
             Each title must be catchy, provocative and description must be concise and intriguing.
             Focus on high-risk, high-reward scenarios that would make exciting betting opportunities.
             Return only 2 {title, description} pairs in JSON format, with no additional explanations.
-            Example prediction: SUI price might skyrocket to $10 within weeks, creating millionaires overnight.`,
+            Do NOT mention any specific influencer names in the predictions.
+            Example prediction: "SUI price might skyrocket to $10 within weeks, creating millionaires overnight.","With next project will addapt Sui to the next level."`,
         },
         { role: "user", content: prompt },
       ],
@@ -119,10 +120,15 @@ class GrokAIService {
     
     let content = res.choices[0].message.content?.trim() || "";
     
-    // Cố gắng trích xuất chỉ phần JSON từ phản hồi
+    // Handle response object conversion to JSON
+    if (typeof content === 'object') {
+      return JSON.stringify(content, null, 2);
+    }
+    
+    // Existing code for handling string content
     try {
       // Tìm và trích xuất phần JSON từ phản hồi
-      const jsonMatch = content.match(/\[\s*{[\s\S]*}\s*\]|\{\s*"title"[\s\S]*\}/);
+      const jsonMatch = content.match(/(\[\s*{[\s\S]*?}\s*\])|({[\s\S]*?title[\s\S]*?})/);
       if (jsonMatch) {
         content = jsonMatch[0];
       }
@@ -131,15 +137,11 @@ class GrokAIService {
       const parsed = JSON.parse(content);
       
       // Nếu là mảng, lấy tối đa 2 phần tử đầu tiên
-      if (Array.isArray(parsed)) {
-        const limitedResults = parsed.slice(0, 2);
-        return JSON.stringify(limitedResults, null, 2);
-      }
-      
-      // Nếu là đối tượng đơn lẻ, trả về nó
-      return JSON.stringify(parsed, null, 2);
+      return Array.isArray(parsed)
+      ? JSON.stringify(parsed.slice(0, 2), null, 2)
+      : JSON.stringify([parsed], null, 2);
+
     } catch (e) {
-      // Nếu không phải JSON hợp lệ, trả về nguyên văn
       return content;
     }
   }
