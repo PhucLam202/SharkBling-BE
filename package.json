@@ -1,10 +1,9 @@
 {
   "name": "sharkbling-be",
   "version": "1.0.0",
-  "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "nodemon --ext ts,js,json --exec tsx index.cts",
+    "dev": "nodemon --ext ts,js,json --exec tsx index.ts",
     "build": "tsup",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
