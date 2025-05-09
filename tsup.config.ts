@@ -7,5 +7,6 @@ export default defineConfig({
   target: 'node20',
   clean: true,
   dts: false,
-  external: ['express', 'cors', '@mysten/walrus-wasm']
+  external: ['@mysten/walrus-wasm'],
+  outDir: 'dist'
 });

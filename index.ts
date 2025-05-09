@@ -1,5 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes/index.js";
+import { registerRoutes } from "./routes/index.js"; 
 import cors from "cors";
 import dotenv from "dotenv";
 

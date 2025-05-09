@@ -1,9 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import xRouter from "./xRouter.ts";
-import walrusRouter from "./walrusRouter.ts";
-import grokRouter from "./grokAIRouter.ts";
-import suiAgentRouter from "./suiAgentRouter.ts";
+import xRouter from "./xRouter.js";
+import walrusRouter from "./walrusRouter.js";
+import grokRouter from "./grokAIRouter.js";
+import suiAgentRouter from "./suiAgentRouter.js";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Register API routes
   app.use("/v1/twitter", xRouter);
