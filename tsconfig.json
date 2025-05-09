@@ -11,7 +11,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "resolveJsonModule": true,
-    "types": ["node"]
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types", "./@types"]
   },
   "include": ["./**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
