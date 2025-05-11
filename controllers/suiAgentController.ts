@@ -1,4 +1,3 @@
-// SuiAgentController.ts
 import { Request, Response, NextFunction } from "express";
 import { IGetVaultsParams, SuiAgentKit } from "@getnimbus/sui-agent-kit";
 import { CustomExpress } from "../middlewares/app/customResponse.ts";
@@ -17,7 +16,7 @@ import {
   FlowXSwapParams,
 } from "../types/blockchain.ts";
 import { suiInfluencers } from "../types/data/influencer.ts";
-import { getTokenAddress, isValidToken } from "../middlewares/token/TokenMapping.ts";
+import { getTokenAddress } from "../middlewares/token/TokenMapping.ts";
 
 /**
  * Controller điều phối các yêu cầu từ người dùng tới các services
@@ -27,6 +26,7 @@ class SuiAgentController {
   private blockchainService: BlockchainService;
   private marketAnalysisService: MarketAnalysisService;
   private flowXService: FlowXService;
+
   /**
    * Khởi tạo controller với các services cần thiết
    */
@@ -50,23 +50,17 @@ class SuiAgentController {
 
   /**
    * Xử lý tin nhắn chat từ người dùng
-   * @param req Request object
-   * @param res Response object
-   * @param next NextFunction
    */
   async handleChatMessage(req: Request, res: Response, next: NextFunction) {
     const appExpress = new CustomExpress(req, res, next);
-
     try {
       const { message } = req.body;
-
       if (!message || typeof message !== "string") {
         return res.status(400).json({
           success: false,
           message: "A valid message is required",
         });
       }
-
       const response = await this.processMessageWithAI(message);
       appExpress.response200({ response });
     } catch (error) {
@@ -79,44 +73,37 @@ class SuiAgentController {
     }
   }
 
-  /**
-   * Xử lý tin nhắn với AI và thực thi lệnh tương ứng
-   * @param message Tin nhắn từ người dùng
-   * @returns Kết quả xử lý dạng string
-   */
-  private async processMessageWithAI(message: string): Promise<string> {
-    console.log(message);
-    try {
-      // Lấy phản hồi từ AI và phân tích intent
-      const { intent, params } = await this.aiService.processMessage(message);
-      console.log(intent, params);
-      // Thực thi intent tương ứng
+
+ private async processMessageWithAI(message: string): Promise<string> {
+  console.log("User message:", message);
+
+  const aiRaw = await this.aiService.getAIResponse(message);
+
+  if (aiRaw.trim().startsWith("{")) {
+    const { intent, params } = this.aiService.parseAIResponse(aiRaw);
+
+    if (intent && intent !== "unknown") {
       return await this.executeIntent(intent, params);
-    } catch (error) {
-      return `Error processing your request: ${(error as Error).message}`;
     }
+    return await this.executeIntent(intent, params);
   }
+  return aiRaw;
+}
+
   private async suggestBetFromInfluencers(): Promise<string> {
     const grokService = new GrokAIService();
-    let results: string[] = [];
+    const results: string[] = [];
     let counter = 1;
 
     for (const influencer of suiInfluencers) {
-      const screenname = influencer.screenname;
-      console.log("screenname", screenname);
       try {
-        const tweets = await grokService.generateInfluencer(screenname);
-
-        if (tweets && tweets.trim() !== "") {
-          // Thêm số thứ tự cho mỗi influencer
-          results.push(`${counter}.\n${tweets}`);
+        const tweets = await grokService.generateInfluencer(influencer.screenname);
+        if (tweets?.trim()) {
+          results.push(`${counter}. ${tweets}`);
           counter++;
         }
       } catch (err) {
-        console.warn(
-          `⚠️ Failed to process tweets for ${influencer.name}: ${err}`
-        );
-        continue;
+        console.warn(`Failed for ${influencer.screenname}: ${err}`);
       }
     }
 
@@ -124,133 +111,118 @@ class SuiAgentController {
       ? results.join("\n\n")
       : "No predictions available from influencers.";
   }
-  private convertDecimalToInteger(decimalValue: string, decimals: number = 9): string {
+
+  private convertDecimalToInteger(
+    decimalValue: string,
+    decimals: number = 9
+  ): string {
     if (!decimalValue || isNaN(Number(decimalValue))) {
       throw new Error("Invalid decimal value");
     }
-    
-    // Chuyển đổi từ số thập phân sang đơn vị nhỏ nhất
-    // Ví dụ: 0.2 SUI với 9 decimals = 0.2 * 10^9 = 200,000,000 MIST
     const integerValue = Math.round(
       Number(decimalValue) * Math.pow(10, decimals)
     );
-  
     return integerValue.toString();
   }
+
   /**
    * Thực thi intent được phân tích từ tin nhắn người dùng
-   * @param intent Intent được xác định
-   * @param params Các tham số cho intent
-   * @returns Kết quả thực thi dạng string
    */
   private async executeIntent(
     intent: string,
     params: Record<string, any>
   ): Promise<string> {
-    console.log("intent", intent);
-    console.log("params", params);
+    console.log("Executing intent:", intent);
+    // Map intent -> handler function
+    const handlers: Record<
+      string,
+      (p: Record<string, any>) => Promise<string>
+    > = {
+      balance: async () => this.blockchainService.getBalance(),
+
+      transfer: async (p) => this.blockchainService.transferToken(p),
+
+      swap: async (p) => {
+        const tokenIn = getTokenAddress(p.fromToken || p.tokenIn);
+        const tokenOut = getTokenAddress(p.toToken || p.tokenOut);
+        if (!tokenIn || !tokenOut) {
+          return `Error: Missing address for ${p.fromToken || p.tokenIn} or ${p.toToken || p.tokenOut}`;
+        }
+        const flowParams: FlowXSwapParams = {
+          tokenIn,
+          tokenOut,
+          amountIn: p.amount
+            ? this.convertDecimalToInteger(p.amount.toString())
+            : p.inputAmount?.toString() || p.amountIn?.toString(),
+          slippage: 1,
+        };
+        return this.flowXService.FlowXSwap(flowParams);
+      },
+
+      stake: async (p) => this.blockchainService.stakeTokens(p),
+
+      getStake: async () => this.blockchainService.getStakeInfo(),
+
+      unstake: async (p) => this.blockchainService.unstakeTokens(p),
+
+      stakeSuilend: async (p) => {
+        const sParams: StakingParams = { type: "STAKING", amount: Number(p.amount), symbol: p.symbol };
+        return this.blockchainService.stakeSuilend(sParams);
+      },
+
+      withdrawSuilend: async (p) => {
+        const uParams: IUnstakingParams = { type: "UNSTAKING", amount: Number(p.amount), symbol: p.symbol, positionId: p.positionId };
+        return this.blockchainService.withdrawSuilend(uParams);
+      },
+
+      lendingSuilend: async (p) => {
+        const lParams: ILendingParams = { type: "LENDING", amount: Number(p.amount), symbol: p.symbol };
+        return this.blockchainService.lendingSuilend(lParams);
+      },
+
+      getVaults: async (p) => {
+        const vParams: IGetVaultsParams = {
+          address: p.address || "",
+          order: p.order || "desc",
+          protocol: p.protocol || "",
+          tvl: p.tvl || "ALL",
+          apr: p.apr || "ALL",
+          tags: p.tags || [],
+        };
+        return this.blockchainService.getVaults(vParams);
+      },
+
+      deployToken: async (p) => {
+        const tParams: ICreateTokenForm = {
+          name: p.name,
+          symbol: p.symbol,
+          totalSupply: p.totalSupply,
+          decimals: p.decimals,
+          imageUrl: p.imageUrl,
+          description: p.description || "",
+          fixedSupply: p.fixedSupply !== false,
+        };
+        return this.blockchainService.deployToken(tParams);
+      },
+
+      suggestBet: async () => this.suggestBetFromInfluencers(),
+
+      trendingTokens: async () => {
+        const res = await this.marketAnalysisService.analyzeTrendingTokens();
+        return JSON.stringify(res);
+      },
+    };
+
+    if (!handlers[intent]) {
+      const list = Object.keys(handlers).join(", ");
+      return `Unknown command. Available: ${list}`;
+    }
+
+    // Thực thi chung trong try/catch
     try {
-      switch (intent) {
-        case "balance":
-          return await this.blockchainService.getBalance();
-
-        case "transfer":
-          return await this.blockchainService.transferToken(params);
-
-        // case "swap":
-        //   return await this.blockchainService.swapTokens(params);
-        case "swap":
-          // Chuyển đổi từ symbol sang địa chỉ token
-          const tokenInAddress = getTokenAddress(params.fromToken || params.tokenIn);
-          const tokenOutAddress = getTokenAddress(params.toToken || params.tokenOut);
-          
-          if (!tokenInAddress || !tokenOutAddress) {
-            return `Error: Could not find address for token ${params.fromToken || params.tokenIn} or ${params.toToken || params.tokenOut}`;
-          }
-          
-          const flowXParams: FlowXSwapParams = {
-            tokenIn: tokenInAddress,
-            tokenOut: tokenOutAddress,
-            amountIn: params.amount ? 
-              this.convertDecimalToInteger(params.amount.toString()) : 
-              params.inputAmount?.toString() || params.amountIn?.toString(),
-            slippage: 1, // Default slippage of 1%
-          };
-          return await this.flowXService.FlowXSwap(flowXParams);
-        case "stake":
-          return await this.blockchainService.stakeTokens(params);
-
-        case "getStake":
-          return await this.blockchainService.getStakeInfo();
-
-        case "unstake":
-          return await this.blockchainService.unstakeTokens(params);
-
-        case "stakeSuilend":
-          // Chuyển đổi params thành StakingParams
-          const stakingParams: StakingParams = {
-            type: "STAKING",
-            amount: Number(params.amount),
-            symbol: params.symbol,
-          };
-          return await this.blockchainService.stakeSuilend(stakingParams);
-
-        case "withdrawSuilend":
-          // Chuyển đổi params thành IUnstakingParams
-          const unstakingParams: IUnstakingParams = {
-            type: "UNSTAKING",
-            amount: Number(params.amount),
-            symbol: params.symbol,
-            positionId: params.positionId,
-          };
-          return await this.blockchainService.withdrawSuilend(unstakingParams);
-
-        case "lendingSuilend":
-          // Chuyển đổi params thành ILendingParams
-          const lendingParams: ILendingParams = {
-            type: "LENDING",
-            amount: Number(params.amount),
-            symbol: params.symbol,
-          };
-          return await this.blockchainService.lendingSuilend(lendingParams);
-
-        case "getVaults":
-          // Chuyển đổi params thành IGetVaultsParams
-          const vaultParams: IGetVaultsParams = {
-            address: params.address || "",
-            order: params.order || "desc",
-            protocol: params.protocol || "",
-            tvl: params.tvl || "ALL",
-            apr: params.apr || "ALL",
-            tags: params.tags || [],
-          };
-          return await this.blockchainService.getVaults(vaultParams);
-
-        case "deployToken":
-          // Chuyển đổi params thành ICreateTokenForm
-          const tokenParams: ICreateTokenForm = {
-            name: params.name,
-            symbol: params.symbol,
-            totalSupply: params.totalSupply,
-            decimals: params.decimals,
-            imageUrl: params.imageUrl,
-            description: params.description || "",
-            fixedSupply: params.fixedSupply === false ? false : true,
-          };
-          return await this.blockchainService.deployToken(tokenParams);
-
-        case "suggestBet":
-          return await this.suggestBetFromInfluencers();
-        case "trendingTokens":
-          const result =
-            await this.marketAnalysisService.analyzeTrendingTokens();
-          return JSON.stringify(result);
-
-        default:
-          return "Unknown command. Available: balance, transfer, swap, stake, getStake, unstake, stakeSuilend, withdrawSuilend, lendingSuilend, getVaults, deployToken, topcoin, trendingTokens";
-      }
-    } catch (error) {
-      return `Command execution failed: ${(error as Error).message}`;
+      return await handlers[intent](params);
+    } catch (err) {
+      return `Command execution failed: ${(err as Error).message}`;
     }
   }
 }

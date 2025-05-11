@@ -27,6 +27,42 @@ export class AIService {
    * @returns Phản hồi từ OpenAI dưới dạng string
    */
   async getAIResponse(message: string): Promise<string> {
+    // 1. Bắt greeting đơn giản
+    const greetingRegex = /^(hi|hello|hey|chào)([\s!.,]?|$)/i;
+    if (greetingRegex.test(message.trim())) {
+      return "Hi I'm your AI assistant. How can I help you?";
+    }
+
+    const commandKeywords = [
+      "balance", "transfer", "swap", "stake", "getStake", "unstake",
+      "stakeSuilend", "withdrawSuilend", "lendingSuilend", "getVaults",
+      "deployToken", "suggestBet", "trendingTokens"
+    ];
+    const hasCommand = commandKeywords.some(kw =>
+      new RegExp(`\\b${kw}\\b`, "i").test(message)
+    );
+
+    if (!hasCommand) {
+      const chatResp = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are a friendly blockchain assistant. Answer naturally." },
+            { role: "user", content: message },
+          ],
+          max_tokens: 150,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.openaiApiKey}`,
+            "Content-Type": "application/json"
+          }
+        }
+      );
+      return chatResp.data.choices[0].message.content;
+    }
+
     try {
       const response = await axios.post(
         "https://api.openai.com/v1/chat/completions",
@@ -36,38 +72,44 @@ export class AIService {
             {
               role: "system",
               content: `
-You are an assistant for blockchain command analysis. 
+You are an assistant for blockchain command analysis.
 You must extract the user's intent and parameters in structured JSON format.
 
 Available intents:
+- "balance"
+- "transfer"
+- "swap"
+- "stake"
+- "getStake"
+- "unstake"
+- "stakeSuilend"
+- "withdrawSuilend"
+- "lendingSuilend"
+- "getVaults"
+- "deployToken"
+- "suggestBet"
+- "trendingTokens"
 
-- "trendingTokens": user wants to list or analyze trending tokens on the Sui network (e.g., "show me hot tokens", "top Sui tokens today").
-- "suggestBet": user wants help creating a fun betting topic, description or idea — especially if it involves trending tokens, influencers, or speculative ideas.
-- Other intents: "balance", "transfer", "swap", "stake", "getStake", "unstake", "stakeSuilend", "withdrawSuilend", "lendingSuilend", "getVaults", "deployToken".
-
-If the user combines multiple ideas, return the one that is the *main action* (e.g., if the user wants trending tokens AND a bet idea based on them, choose "suggestBet").
-
-Respond with:
+If user message doesn't match any intent, respond with:
 {
-  "intent": "<intent>",
-  "params": { <key>: <value> }
+  "intent": "unknown",
+  "params": {}
 }
 
-DO NOT include explanations, preambles, or additional text.
+Respond with EXACTLY this JSON object, no extra text.
 `
             },
             { role: "user", content: message },
           ],
           max_tokens: 100,
         },
-        { 
-          headers: { 
-            Authorization: `Bearer ${this.openaiApiKey}`, 
-            "Content-Type": "application/json" 
-          } 
+        {
+          headers: {
+            Authorization: `Bearer ${this.openaiApiKey}`,
+            "Content-Type": "application/json"
+          }
         }
       );
-      
       return response.data.choices[0].message.content;
     } catch (error) {
       console.error(`Failed to get AI response: ${error}`);
@@ -85,12 +127,12 @@ DO NOT include explanations, preambles, or additional text.
       const parsed = JSON.parse(aiResponse);
       if (!parsed.intent || typeof parsed.intent !== "string") {
         console.warn(`Invalid AI response format: ${aiResponse}`);
-        return { intent: "", params: {} };
+        return { intent: "unknown", params: {} };
       }
       return { intent: parsed.intent, params: parsed.params || {} };
     } catch (e) {
       console.error(`Failed to parse AI response: ${aiResponse}, error: ${e}`);
-      return { intent: "", params: {} };
+      return { intent: "unknown", params: {} };
     }
   }
 
